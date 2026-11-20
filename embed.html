@@ -1,0 +1,457 @@
+<!--
+  ============================================================================
+  Lodgify signup popup – WordPress build (lodgify.com/blog)  ·  ANNOTATED
+  ============================================================================
+  Derived from index.html (Webflow build, left untouched). See /pr-notes for
+  the full change log. For production, use embed.min.html (same logic, no
+  comments).
+
+  HOW TO INSTALL (read before pasting)
+  - Inject via WPCode ("Site Wide Footer"), a theme's wp_footer hook or GTM
+    (Custom HTML tag). Do NOT paste into post content, the classic editor or a
+    Text/HTML widget: wpautop + wptexturize rewrite "&&" to "&#038;&&#038;",
+    insert <p>/<br> tags and break the script.
+  - Keep the <dialog> markup ABOVE the <script> (as it is here) and keep them
+    together in one snippet; the script reads #demo-modal immediately.
+  - Make sure the snippet loads in the footer (or after the markup).
+  - Optimisation plugins: exclude this script from "Delay JS until user
+    interaction" (WP Rocket: add the keyword  lodgify-signup  to the delay
+    exclusion list), otherwise the first CTA click skips the modal and goes
+    straight to /signup. See pr-notes/wordpress-deployment-checklist.md.
+  - CSP: if the blog sends a Content-Security-Policy it needs
+    frame-src https://app.lodgify.com and a nonce / 'unsafe-inline' for the
+    inline <style> and <script>.
+
+  CSS LEAK POLICY
+  Every selector below is scoped to #demo-modal (or uses a lodgify- prefix).
+  Nothing targets html, body, bare dialog or bare button, so the theme's
+  layout and any other native <dialog> on the page are left alone.
+-->
+<style>
+  /* Dialog shell. Scoped by id so other <dialog> elements (popup/newsletter/lightbox plugins) are unaffected. */
+  #demo-modal{position:fixed;inset:0;margin:auto;border:0;padding:0;background:none;width:100%;max-width:min(90vw,480px);max-height:85dvh;overflow:visible;color:#111;font-family:inherit;line-height:1.5}
+  /* Safety net: a theme rule such as "dialog{display:block}" must not show a closed modal. */
+  #demo-modal:not([open]){display:none}
+  #demo-modal::backdrop{background:rgb(0 0 0/.5)}
+
+  /* Scroll lock. Applied by JS (class on <body>) instead of the old html{scrollbar-gutter:stable} + body:has(dialog[open]) pair, which affected the whole blog's layout. JS adds padding-right equal to the scrollbar width to avoid a layout jump. */
+  body.lodgify-modal-open{overflow:hidden}
+
+  .lodgify-modal-card{position:relative;display:flex;flex-direction:column;width:100%;max-height:85dvh;border-radius:2rem;background:#fff;overflow:hidden;isolation:isolate;box-sizing:border-box}
+  .lodgify-modal-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;border-radius:inherit;scrollbar-width:none}
+  .lodgify-modal-scroll::-webkit-scrollbar{display:none}
+  /* Custom scroll thumb (native scrollbar is hidden above) */
+  .lodgify-modal-thumb{position:absolute;top:0;right:5px;z-index:1;width:4px;border-radius:999px;background:rgb(0 0 0/.2);opacity:0;transition:opacity .2s ease;pointer-events:none}
+  .lodgify-modal-card.lodgify-is-scrollable .lodgify-modal-thumb{opacity:1}
+
+  #lodgify-signup{display:block;width:100%;min-height:228px;max-width:none;margin:0;border:0;opacity:0;transition:opacity .15s ease-out}
+  #lodgify-signup.lodgify-is-ready{opacity:1}
+  .lodgify-modal-loading{position:absolute;inset:0;min-height:228px;background:#fff;animation:lodgify-pulse 1.4s ease-in-out infinite}
+  .lodgify-modal-loading[hidden]{display:none}
+  @keyframes lodgify-pulse{0%,100%{background:#fff}50%{background:#f4f4f5}}
+
+  /* Close button. WP themes style bare <button> (padding, shadow, text-transform, hover colours…), so every property that could be inherited from the theme is reset explicitly. */
+  #demo-modal .lodgify-modal-close{position:absolute;top:.5rem;right:.75rem;z-index:1;display:flex;align-items:center;justify-content:center;width:2rem;height:2rem;min-height:0;margin:0;padding:0;border:0;border-radius:999px;background:rgb(0 0 0/.06);box-shadow:none;color:#111;font-family:inherit;font-size:1.25rem;font-weight:400;line-height:1;letter-spacing:normal;text-transform:none;text-decoration:none;text-shadow:none;-webkit-appearance:none;appearance:none;cursor:pointer}
+  #demo-modal .lodgify-modal-close:hover,#demo-modal .lodgify-modal-close:focus{background:rgb(0 0 0/.12);color:#111;box-shadow:none}
+  #demo-modal .lodgify-modal-close:focus-visible{outline:2px solid #111;outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){
+    .lodgify-modal-thumb,#lodgify-signup{transition:none}
+    .lodgify-modal-loading{animation:none}
+  }
+</style>
+<dialog id="demo-modal" aria-label="Sign up">
+  <div class="lodgify-modal-card">
+    <button type="button" data-lodgify-close aria-label="Close" class="lodgify-modal-close">×</button>
+    <div class="lodgify-modal-loading" data-lodgify-loading aria-hidden="true"></div>
+    <div class="lodgify-modal-thumb" data-lodgify-thumb aria-hidden="true"></div>
+    <div class="lodgify-modal-scroll" data-lodgify-scroll>
+      <!--
+        src is intentionally empty: it is set by JS on first open, so lazy-load
+        plugins have no src to move into data-src. The data-* / loading
+        attributes are extra opt-outs for lazy-load plugins (WP Rocket,
+        Smush, a3, Perfmatters, LiteSpeed, etc.).
+      -->
+      <iframe
+        id="lodgify-signup"
+        title="Sign up"
+        loading="eager"
+        data-no-lazy="1"
+        data-skip-lazy="1"
+        sandbox="allow-scripts allow-forms allow-same-origin allow-top-navigation-by-user-activation allow-popups allow-popups-to-escape-sandbox"
+        referrerpolicy="strict-origin-when-cross-origin"
+      ></iframe>
+    </div>
+  </div>
+</dialog>
+<!--
+  The data-* attributes on this script tell optimisation plugins to leave it
+  alone: data-cfasync (Cloudflare Rocket Loader + WP Rocket), data-no-optimize
+  (Autoptimize, LiteSpeed, SG Optimizer), data-no-defer, data-no-minify.
+  Plugins that use keyword lists (WP Rocket "Delay JS") still need
+  "lodgify-signup" added in their settings.
+-->
+<script data-cfasync="false" data-no-optimize="1" data-no-defer="1" data-no-minify="1">
+  (function () {
+    // Bail out if the markup is missing (script ran before the dialog existed, or the snippet was split up),
+    // and guard against the snippet being injected twice.
+    const dialog = document.getElementById('demo-modal');
+    if (!dialog || window.__lodgifySignupEmbed) return;
+    window.__lodgifySignupEmbed = true;
+
+    // Prod app by default. The integration site (lodgifyintegration.com) talks to the integration app.
+    // NOTE: any other host (WP Engine staging, preview domains, localhost) falls through to PROD, so test signups there create real accounts.
+    const EMBED_ORIGIN = /(^|\.)lodgifyintegration\.com$/.test(location.hostname)
+      ? 'https://app.lodgifyintegration.com'
+      : 'https://app.lodgify.com';
+    const EMBED_SRC = EMBED_ORIGIN + '/signup/marketing-iframe';
+    const FALLBACK_URL = EMBED_ORIGIN + '/signup';
+    const SUPPORTED = ['en', 'de', 'es', 'it', 'fr', 'pt'];
+    const SOURCE = 'lodgify-signup';
+    const VERSION = 1;
+    const READY_TIMEOUT_MS = 5000;
+    const TRACK_TIMEOUT_MS = 1000;
+    const DEMO_EMAIL_EVENT = 'lodgify-demo:email-signup';
+    const DEMO_GOOGLE_EVENT = 'lodgify-demo:google-signup';
+    // URL param used to re-open the modal after a link is opened in a new tab / page reload.
+    const OPEN_FLAG = 'open_signup';
+    const THUMB_INSET = 6;
+    const THUMB_MIN = 32;
+
+    // (removed vs index.html: ORIGINS, PRICING_PATHS, BF_OFFER_PATH_RE, PLP_PATH_RE, OPEN_ORIGIN_FLAG – Webflow-only page detection)
+
+    const card = dialog.querySelector('.lodgify-modal-card');
+    const scroller = card.querySelector('[data-lodgify-scroll]');
+    const frame = document.getElementById('lodgify-signup');
+    const loading = card.querySelector('[data-lodgify-loading]');
+    const thumb = card.querySelector('[data-lodgify-thumb]');
+
+    let readyTimer = null;
+    let isReady = false;
+    let hasFailed = false;
+    let sentEmail = null;
+    let isTrackSettled = true;
+    let trackWaiters = [];
+    const pending = {
+      email: null,
+      locale: null,
+      source: 'marketing-modal',
+      signupLocation: null,
+    };
+
+    // ---- Analytics (RudderStack) -------------------------------------------------------------
+    // Requires window.rudderanalytics on the blog (same write key as the Webflow pages) and a
+    // consent-gated load via OneTrust. If Rudder is not loaded, track() is a no-op: the events
+    // are lost but signup/navigation still works. Verify in the console: typeof rudderanalytics.
+    function settleTrack() {
+      isTrackSettled = true;
+      const waiters = trackWaiters;
+      trackWaiters = [];
+      for (let i = 0; i < waiters.length; i++) waiters[i]();
+    }
+    function track(event, properties) {
+      if (!window.rudderanalytics || !window.rudderanalytics.track) return;
+      const props = Object.assign(
+        {
+          signup_surface: 'marketing-embed',
+          source: pending.source,
+          signup_location: pending.signupLocation,
+        },
+        properties || {}
+      );
+      isTrackSettled = false;
+      setTimeout(settleTrack, TRACK_TIMEOUT_MS);
+      window.rudderanalytics.track(event, props, settleTrack);
+    }
+    // Delays a navigation until the track call has flushed (or the 1s timeout passes), so the event isn't lost on page unload.
+    function whenTrackSettled(run) {
+      if (isTrackSettled) return run();
+      trackWaiters.push(run);
+    }
+
+    // ---- Custom scroll thumb ------------------------------------------------------------------
+    function updateThumb() {
+      const viewport = scroller.clientHeight;
+      const content = scroller.scrollHeight;
+      if (content - viewport <= 1) {
+        card.classList.remove('lodgify-is-scrollable');
+        return;
+      }
+      card.classList.add('lodgify-is-scrollable');
+      const trackLength = viewport - THUMB_INSET * 2;
+      const height = Math.max(THUMB_MIN, (trackLength * viewport) / content);
+      const offset = (scroller.scrollTop / (content - viewport)) * (trackLength - height);
+      thumb.style.height = height + 'px';
+      thumb.style.transform = 'translateY(' + (THUMB_INSET + offset) + 'px)';
+    }
+    scroller.addEventListener('scroll', updateThumb, { passive: true });
+    window.addEventListener('resize', updateThumb);
+
+    // ---- Page scroll lock ----------------------------------------------------------------------
+    // Replaces html{scrollbar-gutter:stable} + body:has(dialog[open]). Scoped to our own dialog and
+    // compensates for the vanishing scrollbar so the blog doesn't jump sideways.
+    let scrollLocked = false;
+    let prevBodyPadding = '';
+    function lockScroll() {
+      if (scrollLocked) return;
+      scrollLocked = true;
+      const body = document.body;
+      const sbw = window.innerWidth - document.documentElement.clientWidth;
+      prevBodyPadding = body.style.paddingRight;
+      if (sbw > 0) {
+        body.style.paddingRight = (parseFloat(getComputedStyle(body).paddingRight) || 0) + sbw + 'px';
+      }
+      body.classList.add('lodgify-modal-open');
+    }
+    function unlockScroll() {
+      if (!scrollLocked) return;
+      scrollLocked = false;
+      document.body.classList.remove('lodgify-modal-open');
+      document.body.style.paddingRight = prevBodyPadding;
+    }
+
+    // ---- Locale --------------------------------------------------------------------------------
+    // 1) first URL segment (/de/blog/… with WPML/Polylang), 2) <html lang>, 3) 'en'.
+    // On plain /blog/… the first segment is "blog" (unsupported) so it falls back to <html lang>.
+    // If the blog is translated, confirm <html lang> is set per language.
+    function normalizeLocale(raw) {
+      if (!raw) return null;
+      const base = String(raw).trim().toLowerCase().split(/[-_]/)[0];
+      return SUPPORTED.indexOf(base) !== -1 ? base : null;
+    }
+    const LOCALE =
+      normalizeLocale(location.pathname.split('/')[1]) ||
+      normalizeLocale(document.documentElement.lang) ||
+      'en';
+
+    // ---- CTA detection -------------------------------------------------------------------------
+    function isTrialHref(href) {
+      let p;
+      try {
+        p = new URL(href, location.href).pathname.toLowerCase();
+      } catch (err) {
+        return false;
+      }
+      if (/\/signup\/book-demo(?:\/|$)/.test(p)) return false;
+      return /\/signup(?:\/|$)/.test(p);
+    }
+    function originalHref(link) {
+      return link.dataset.signupHref || link.getAttribute('href') || '';
+    }
+
+    // sectionOf(): returns the value stored in analytics as signup_location (and as the ?open_signup= value).
+    //   1. The OUTERMOST ancestor with a data-section attribute wins (Webflow pages set this on page sections).
+    //   2. WordPress fallback – themes don't have data-section, so infer from landmarks. The "blog-" prefix keeps
+    //      these values distinguishable from the Webflow section names in reports.
+    //   3. 'unknown' only if nothing matches (should not happen on a normal WP page – there is always a 'blog' default).
+    // Tip: you can still tag specific CTAs/wrappers with data-section="…" in the block editor ("Additional HTML
+    // attributes") or the theme; that always takes precedence over the fallback.
+    function sectionOf(el) {
+      let found = null;
+      for (
+        let n = el.closest('[data-section]');
+        n;
+        n = n.parentElement && n.parentElement.closest('[data-section]')
+      ) {
+        found = n;
+      }
+      if (found && found.dataset.section) return found.dataset.section;
+
+      if (el.closest('header, nav, [role="banner"], [role="navigation"]')) return 'blog-header';
+      if (el.closest('footer, [role="contentinfo"]')) return 'blog-footer';
+      if (el.closest('aside, [role="complementary"], .sidebar, .widget-area, .widget')) return 'blog-sidebar';
+      if (el.closest('article, .entry-content, .post-content, main, [role="main"]')) return 'blog-content';
+      return 'blog';
+    }
+
+    // Link "upgrade": on hover/focus, rewrite /signup links to point at the current page with ?open_signup=<section>,
+    // so middle-click / open-in-new-tab still opens the modal. Plain left-click is intercepted below.
+    function upgradeLink(link) {
+      if (hasFailed || link.dataset.signupHref || dialog.contains(link)) return;
+      const href = link.getAttribute('href') || '';
+      if (!isTrialHref(href)) return;
+      const url = new URL(location.href);
+      url.hash = '';
+      url.searchParams.set(OPEN_FLAG, sectionOf(link));
+      link.dataset.signupHref = href;
+      link.setAttribute('href', url.pathname + url.search);
+      link.setAttribute('aria-haspopup', 'dialog');
+    }
+    function restoreLinks() {
+      document.querySelectorAll('a[data-signup-href]').forEach(function (link) {
+        link.setAttribute('href', link.dataset.signupHref);
+        delete link.dataset.signupHref;
+        link.removeAttribute('aria-haspopup');
+      });
+    }
+    function upgradeFromEvent(e) {
+      const link = e.target && e.target.closest && e.target.closest('a[href]');
+      if (link) upgradeLink(link);
+    }
+    document.addEventListener('pointerover', upgradeFromEvent, { passive: true });
+    document.addEventListener('focusin', upgradeFromEvent);
+
+    // ---- Iframe lifecycle ----------------------------------------------------------------------
+    function buildSrc() {
+      const url = new URL(EMBED_SRC);
+      // Forward the page's query string (utm_*, etc.) to the signup app, except our own open flag.
+      new URLSearchParams(location.search).forEach(function (value, key) {
+        if (key === OPEN_FLAG) return;
+        url.searchParams.set(key, value);
+      });
+      // The embed validates / targets its postMessages against this origin (must be the host page's own origin).
+      url.searchParams.set('origin', location.origin);
+      url.searchParams.set('locale', pending.locale || LOCALE);
+      url.searchParams.set('source', pending.source);
+      if (pending.email) url.searchParams.set('prefill', '1');
+      return url.toString();
+    }
+    function load() {
+      clearTimeout(readyTimer);
+      isReady = false;
+      frame.classList.remove('lodgify-is-ready');
+      loading.hidden = false;
+      scroller.scrollTop = 0;
+      card.classList.remove('lodgify-is-scrollable');
+      frame.removeAttribute('src');
+      frame.src = buildSrc();
+    }
+    function post(type, payload) {
+      if (!frame.contentWindow) return;
+      frame.contentWindow.postMessage(
+        { source: SOURCE, v: VERSION, type: type, payload: payload },
+        EMBED_ORIGIN
+      );
+    }
+    // If the iframe doesn't report "ready" within READY_TIMEOUT_MS (CSP block, network, ad blocker), swap in a plain link
+    // and put all CTAs back to their original /signup hrefs.
+    function showFallback() {
+      hasFailed = true;
+      restoreLinks();
+      loading.hidden = true;
+      scroller.innerHTML =
+        '<div style="padding:32px;text-align:center">' +
+        '<p>Sorry – the signup form could not be loaded.</p>' +
+        '<p><a href="' + FALLBACK_URL + '">Continue to Lodgify signup</a></p></div>';
+      updateThumb();
+    }
+    function openModal() {
+      if (!frame.src || (!dialog.open && pending.email !== sentEmail)) load();
+      if (!isReady) {
+        clearTimeout(readyTimer);
+        readyTimer = setTimeout(showFallback, READY_TIMEOUT_MS);
+      }
+      // Re-parent to <body> so theme wrappers (transform/overflow/z-index) can't clip or mis-stack the modal.
+      if (dialog.parentNode !== document.body) document.body.appendChild(dialog);
+      if (!dialog.open) {
+        lockScroll();
+        dialog.showModal();
+      }
+    }
+    function startPending(source, location_) {
+      pending.source = source;
+      pending.signupLocation = location_;
+    }
+
+    window.addEventListener('message', function (e) {
+      if (e.origin !== EMBED_ORIGIN) return;
+      const d = e.data;
+      if (!d || d.source !== SOURCE || d.v !== VERSION) return;
+      switch (d.type) {
+        case 'ready':
+          clearTimeout(readyTimer);
+          isReady = true;
+          loading.hidden = true;
+          frame.classList.add('lodgify-is-ready');
+          frame.style.height = d.payload.height + 'px';
+          updateThumb();
+          sentEmail = pending.email;
+          post('init', {
+            locale: pending.locale || LOCALE,
+            source: pending.source,
+            prefill: pending.email ? { email: pending.email } : undefined,
+          });
+          break;
+        case 'resize':
+          frame.style.height = d.payload.height + 'px';
+          updateThumb();
+          break;
+        case 'close':
+          dialog.close();
+          break;
+        case 'navigate':
+          if (d.payload.target === 'top' && new URL(d.payload.url).origin === EMBED_ORIGIN) {
+            const target = d.payload.url;
+            whenTrackSettled(function () {
+              location.href = target;
+            });
+          }
+          break;
+        case 'track':
+          track(d.payload.event, d.payload.properties);
+          break;
+      }
+    });
+
+    // Demo-survey hooks (CustomEvents dispatched by the Webflow demo survey). Kept for parity with index.html; harmless on the blog
+    // since nothing dispatches them there. The signup "origin" detail was removed.
+    window.addEventListener(DEMO_EMAIL_EVENT, function (e) {
+      const detail = e.detail || {};
+      pending.email = detail.email || null;
+      pending.locale = normalizeLocale(detail.locale) || LOCALE;
+      startPending('demo-survey', 'demo-survey-end-screen');
+      track('clicked: signup initiated', { signup_method: 'email' });
+      openModal();
+    });
+    window.addEventListener(DEMO_GOOGLE_EVENT, function (e) {
+      const detail = e.detail || {};
+      const url = new URL(EMBED_SRC + '/google-login-redirect');
+      url.searchParams.set('locale', normalizeLocale(detail.locale) || LOCALE);
+      startPending('demo-survey', 'demo-survey-end-screen');
+      track('clicked: signup initiated', { signup_method: 'google' });
+      const target = url.toString();
+      whenTrackSettled(function () {
+        location.href = target;
+      });
+    });
+
+    // ---- Click handling ------------------------------------------------------------------------
+    // Close button + backdrop click: bound to OUR dialog only (the old code attached backdrop-close to every <dialog> on the page).
+    dialog.addEventListener('click', function (e) {
+      if (e.target === dialog || (e.target.closest && e.target.closest('[data-lodgify-close]'))) {
+        e.preventDefault();
+        dialog.close();
+      }
+    });
+    dialog.addEventListener('close', function () {
+      unlockScroll();
+      post('close', {});
+    });
+
+    // CTA clicks: intercept plain left-clicks on /signup links (not /signup/book-demo) and open the modal instead.
+    document.addEventListener('click', function (e) {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const link = e.target.closest && e.target.closest('a[href]');
+      if (!link || hasFailed || dialog.contains(link)) return;
+      if (!isTrialHref(originalHref(link))) return;
+      e.preventDefault();
+      pending.email = null;
+      pending.locale = null;
+      startPending('marketing-modal', sectionOf(link));
+      openModal();
+    });
+
+    // Re-open after "open in new tab": ?open_signup=<section>. The param is stripped from the address bar immediately.
+    (function openFromUrl() {
+      const params = new URLSearchParams(location.search);
+      if (!params.has(OPEN_FLAG)) return;
+      const section = (params.get(OPEN_FLAG) || 'unknown').slice(0, 64);
+      params.delete(OPEN_FLAG);
+      const qs = params.toString();
+      history.replaceState(history.state, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+      pending.email = null;
+      pending.locale = null;
+      startPending('marketing-modal', section);
+      openModal();
+    })();
+  })();
+</script>
